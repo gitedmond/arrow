@@ -1089,6 +1089,7 @@ Examples
                  store_decimal_as_integer=False,
                  write_time_adjusted_to_utc=False,
                  max_rows_per_page=None,
+                 bloom_filter_options=None,
                  **options):
         if use_deprecated_int96_timestamps is None:
             # Use int96 timestamps for Spark
@@ -1144,6 +1145,7 @@ Examples
             store_decimal_as_integer=store_decimal_as_integer,
             write_time_adjusted_to_utc=write_time_adjusted_to_utc,
             max_rows_per_page=max_rows_per_page,
+            bloom_filter_options=bloom_filter_options,
             **options)
         self.is_open = True
 

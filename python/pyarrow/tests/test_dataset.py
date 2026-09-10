@@ -17,6 +17,8 @@
 
 import contextlib
 import datetime
+import inspect
+import json
 import os
 import pathlib
 import posixpath
@@ -4962,6 +4964,51 @@ def test_write_dataset_parquet(tempdir):
             schema = schema.set(1, schema.field(1).with_type(pa.timestamp("us")))
         expected = table.cast(schema)
         assert result.equals(expected)
+
+
+@pytest.mark.parquet
+def test_parquet_write_table_options():
+    format = ds.ParquetFileFormat()
+    # These parameters belong to the write_table wrapper, not file options.
+    excluded = {"table", "where", "row_group_size", "flavor", "filesystem"}
+    for name, parameter in inspect.signature(pq.write_table).parameters.items():
+        if name in excluded or parameter.kind == inspect.Parameter.VAR_KEYWORD:
+            continue
+        format.make_write_options(**{name: parameter.default})
+
+
+@pytest.mark.parquet
+@pytest.mark.parametrize("writer", ["dataset", "parquet"])
+@pytest.mark.parametrize("option", [
+    "store_schema", "write_time_adjusted_to_utc", "bloom_filter_options",
+])
+@pytest.mark.parametrize("enabled", [False, True])
+def test_write_dataset_parquet_writer_options(tempdir, writer, option, enabled):
+    table = pa.table({
+        "value": [1, 2, 3],
+        "time": pa.array([0, 1, 2], type=pa.time32("ms")),
+    })
+    value = {"value": enabled} if option == "bloom_filter_options" else enabled
+    options = {option: value}
+    base_dir = tempdir / "dataset"
+    if writer == "dataset":
+        format = ds.ParquetFileFormat()
+        ds.write_dataset(table, base_dir, format=format,
+                         file_options=format.make_write_options(**options))
+    else:
+        pq.write_to_dataset(table, base_dir, **options)
+
+    metadata = pq.read_metadata(next(base_dir.glob("*.parquet")))
+    assert (b"ARROW:schema" in (metadata.metadata or {})) == options.get(
+        "store_schema", True)
+    logical_type = json.loads(metadata.schema.column(1).logical_type.to_json())
+    assert logical_type["isAdjustedToUTC"] == options.get(
+        "write_time_adjusted_to_utc", False)
+    has_bloom_filter = metadata.row_group(0).column(0).bloom_filter_offset is not None
+    assert has_bloom_filter == options.get("bloom_filter_options", {}).get(
+        "value", False)
+    assert metadata.row_group(0).column(1).bloom_filter_offset is None
+    assert ds.dataset(base_dir, format="parquet").to_table().equals(table)
 
 
 def test_write_dataset_csv(tempdir):
